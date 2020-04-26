@@ -9,6 +9,7 @@ DEPLOY_DIR ?= ${NFS_DIR}/${USER}/tests
 
 CTRL_TEST = set_tbictrl
 ABI_TEST = tbi_abirequest
+TBI_INSN_TEST = tbi_insn_test
 
 .PHONY: all
 
@@ -18,13 +19,18 @@ build/$(CTRL_TEST): Makefile $(CTRL_TEST).cpp
 build/$(ABI_TEST): Makefile $(ABI_TEST).cpp
 	$(RISCV_CXX) -O0 $(ABI_TEST).cpp -o build/$(ABI_TEST)
 
+build/$(TBI_INSN_TEST): Makefile $(TBI_INSN_TEST).cpp
+	$(RISCV_CXX) -O0 test_tbi.cpp -o build/$(TBI_INSN_TEST)
+
 all: \
 	build/$(CTRL_TEST) \
 	build/$(ABI_TEST) \
+	build/$(TBI_INSN_TEST)
 
 deploy: all
 	cp build/$(CTRL_TEST)     -r $(DEPLOY_DIR)
 	cp build/$(ABI_TEST)      -r $(DEPLOY_DIR)
+	cp build/$(TBI_INSN_TEST) -r $(DEPLOY_DIR)
 
 clean:
 	rm build -rf
