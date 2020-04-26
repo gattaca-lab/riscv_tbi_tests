@@ -13,59 +13,62 @@
 #include <chrono>
 
 #include <sys/ucontext.h>
+#include <sys/prctl.h>
 
-#define REG_ADDR "0x800"
-
-void tbi_set_broken(uint64_t new_mode, uint64_t& old_status) {
-  uint64_t ov = -1;
-  __asm__  volatile (
-      "csrrw   %[status], " REG_ADDR ", %[new_mode];\n"
-      : [status] "=r" (ov)
-      : [new_mode] "r" (new_mode)
-      : "memory");
-  old_status = ov;
-}
 void tbi_set_working(uint64_t new_mode, uint64_t& old_status, uint64_t& new_status) {
-  uint64_t ov = -1;
-  uint64_t nv = -1;
-  __asm__  volatile (
-      "csrr   %[status], " REG_ADDR ";\n"
-      "csrw   " REG_ADDR ", %[new_mode];\n"
-      "csrr   %[status2], " REG_ADDR ";\n"
-      : [status] "=r" (ov), [status2] "=r" (nv)
-      : [new_mode] "r" (new_mode)
-      : "memory");
-  old_status = ov;
-  new_status = nv;
+  long result = prctl(PR_GET_TAGGED_ADDR_CTRL, 0, 0, 0, 0);
+  if (result < 0) {
+    perror("could not get TBI status");
+    exit(EXIT_FAILURE);
+  }
+  old_status = result;
+  if (prctl(PR_SET_TAGGED_ADDR_CTRL,
+            (new_mode > 0) ? PR_TAGGED_ADDR_ENABLE : 0,
+            0, 0, 0) < 0) {
+    perror("could not update TBI");
+    exit(EXIT_FAILURE);
+  }
+#if 0
+// This part is for debugging only, and won't work once REG_ADDR becomes priviledged
+#define REG_ADDR "0x800"
+  if (new_mode > 0) {
+    uint64_t status = 0;
+    __asm__  volatile (
+    "csrr   %[status], " REG_ADDR ";\n"
+    : [status] "=r" (status)
+    :
+    : "memory");
+    std::cerr << "the status of TBICTRL: " << status << "\n";
+  }
+#endif
+
+  result = prctl(PR_GET_TAGGED_ADDR_CTRL, 0, 0, 0, 0);
+  if (result < 0) {
+    perror("could not get TBI status");
+    exit(EXIT_FAILURE);
+  }
+  new_status = result;
 }
 struct TbiCtrl {
-  TbiCtrl(bool update, uint64_t new_mode, bool broken_method) {
+  TbiCtrl(bool update, uint64_t new_mode) {
     if (!update) {
       std::cerr << "tbictrl - no update\n";
       return;
     }
-    if (broken_method) {
-      uint64_t status_old = 0;
-      tbi_set_broken(new_mode, status_old);
-      std::cerr << "requesting new status (2-way method): " << new_mode  << "\n";
-    }
-    else {
-      uint64_t status_old = 0;
-      uint64_t status_new = -1;
-      std::cerr << "requesting new status (3-way method): " << new_mode  << "\n";
-      tbi_set_working(new_mode, status_old, status_new);
-      std::cerr << "tbi ctrl updated! old_status: " << status_old <<
-                   ", new_status: " << status_new << "\n";
-    }
+    uint64_t status_old = 0;
+    uint64_t status_new = -1;
+    std::cerr << "requesting new status: " << new_mode  << "\n";
+    tbi_set_working(new_mode, status_old, status_new);
+    std::cerr << "tbi ctrl updated! old_status: " << status_old <<
+                 ", new_status: " << status_new << "\n";
   }
   uint64_t read_tbi() {
-    uint64_t status = 0;
-    __asm__  volatile (
-      "csrr   %[status], " REG_ADDR ";\n"
-      : [status] "=r" (status)
-      :
-      : "memory");
-    return status;
+    long result = prctl(PR_GET_TAGGED_ADDR_CTRL, 0, 0, 0, 0);
+    if (result < 0) {
+      perror("could not get TBI status");
+      exit(EXIT_FAILURE);
+    }
+    return result;
   }
 };
 
@@ -75,12 +78,17 @@ volatile bool adjust_a0 = false;
 volatile bool expect_fault = false;
 volatile int  g_var = 0;
 
+void sys_write(const char* str) {
+  write(0, str, strlen(str));
+}
 void  the_handler(int signal, siginfo_t * info, void * context) {
      ucontext_t *ucontext = (ucontext_t*)context;
   if (!expect_fault) {
+    sys_write("unexpected fault detected\n");
     exit(-6);
   }
-  write(0, "...commencing fault handling\n", 29);
+  sys_write("...commencing fault handling\n");
+
   expect_fault = false;
   fault_observed = true;
 
@@ -107,7 +115,7 @@ int main (int argc, char* argv[]) {
   if (update) {
     new_status = argv[1];
   }
-  TbiCtrl tbi(update, atol(new_status), argc > 2);
+  TbiCtrl tbi(update, atol(new_status));
   unsigned i = 0;
   while (g_do_work) {
     ++i;

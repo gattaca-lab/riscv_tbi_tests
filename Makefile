@@ -5,15 +5,26 @@ RISCV_CC ?= $(shell realpath $(ROOT_DIR)/../../install/bin/riscv64-unknown-linux
 RISCV_CXX ?= $(shell realpath  $(ROOT_DIR)/../../install/bin/riscv64-unknown-linux-gnu-g++)
 NFS_DIR ?= /tank/work/dev/share/nfs
 
+DEPLOY_DIR ?= ${NFS_DIR}/${USER}/tests
+
+CTRL_TEST = set_tbictrl
+ABI_TEST = tbi_abirequest
+
 .PHONY: all
 
-build/set_tbictrl: Makefile set_tbictrl.cpp
-	$(RISCV_CXX) -O0 set_tbictrl.cpp -o build/set_tbictrl
+build/$(CTRL_TEST): Makefile $(CTRL_TEST).cpp
+	$(RISCV_CXX) -O0 $(CTRL_TEST).cpp -o build/$(CTRL_TEST)
 
-build/all: set_tbictrl
+build/$(ABI_TEST): Makefile $(ABI_TEST).cpp
+	$(RISCV_CXX) -O0 $(ABI_TEST).cpp -o build/$(ABI_TEST)
 
-deploy: build/set_tbictrl
-	cp build/set_tbictrl ${NFS_DIR}/${USER}/tests -r
+all: \
+	build/$(CTRL_TEST) \
+	build/$(ABI_TEST) \
+
+deploy: all
+	cp build/$(CTRL_TEST)     -r $(DEPLOY_DIR)
+	cp build/$(ABI_TEST)      -r $(DEPLOY_DIR)
 
 clean:
 	rm build -rf
