@@ -23,6 +23,48 @@ void tbi_set(uint64_t new_mode, uint64_t& old_status) {
   }
 }
 
+bool atomic_lr_sc_check()
+{
+  volatile uint64_t a = 0;
+  volatile uint64_t* ptr = &a;
+  uint64_t addr = ((uint64_t)ptr) | (1ull << 62);
+  uint64_t expected_value = 777;
+
+  uint64_t failure = 0;
+  /* Notes regarding lr/cs behavior
+   * # a0 holds address of memory location
+   * # a1 holds expected value
+   * # a2 holds desired value
+   * # a0 holds return value, 0 if successful, !0 otherwise
+  cas:
+    lr.w t0, (a0) # Load original value.
+    bne t0, a1, fail # Doesn't match, so fail.
+    sc.w a0, a2, (a0) # Try to update.
+    jr ra # Return.
+    fail:
+    li a0, 1 # Set return to failure.
+    jr ra # Return.
+  */
+  __asm__  volatile (
+    "mv a0, %[in_address]\n"
+    "lr.d a1, 0(a0)\n"
+    "sc.d %[res_flag], %[new_value], 0(a0)\n"
+    : [res_flag] "=r" (failure)
+    : [in_address] "r" (addr), [new_value] "r" (expected_value)
+    : "memory", "a0", "a1");
+
+  if (failure) {
+    std::cerr << "cs.d indicates failure\n";
+    return false;
+  }
+
+  if (a != expected_value) {
+    std::cerr << "lr->cs.d produces wrong result\n";
+    return false;
+  }
+  return true;
+}
+
 bool double_load_check()
 {
     double_val = 123.1;
@@ -36,13 +78,13 @@ bool double_load_check()
             "fld %[res], 0(a0)\n"
             : [res] "=f" (valid_res)
             : [in_address] "r" (valid_ptr)
-            : "memory");
+            : "memory", "a0");
     __asm__  volatile (
             "mv a0, %[in_address]\n"
             "fld %[res], 0(a0)\n"
             : [res] "=f" (invalid_res)
             : [in_address] "r" (invalid_ptr)
-            : "memory");
+            : "memory", "a0");
     return (valid_res == invalid_res);
 }
 
@@ -60,7 +102,7 @@ bool double_store_check()
             "fsd %[val], 0(a0)\n"
             :
             : [in_address] "r" (valid_ptr), [val] "f" (val_to_store)
-            : "memory");
+            : "memory", "a0");
     valid_res = double_val;
     double_val = 123.1;
     __asm__  volatile (
@@ -68,7 +110,7 @@ bool double_store_check()
             "fsd %[val], 0(a0)\n"
             :
             : [in_address] "r" (invalid_ptr), [val] "f" (val_to_store)
-            : "memory");
+            : "memory", "a0");
     invalid_res = double_val;
     return (valid_res == invalid_res);
 }
@@ -86,13 +128,13 @@ bool float_load_check()
             "flw %[res], 0(a0)\n"
             : [res] "=f" (valid_res)
             : [in_address] "r" (valid_ptr)
-            : "memory");
+            : "memory", "a0");
     __asm__  volatile (
             "mv a0, %[in_address]\n"
             "flw %[res], 0(a0)\n"
             : [res] "=f" (invalid_res)
             : [in_address] "r" (invalid_ptr)
-            : "memory");
+            : "memory", "a0");
     return (valid_res == invalid_res);
 }
 
@@ -110,7 +152,7 @@ bool float_store_check()
             "fsw %[val], 0(a0)\n"
             :
             : [in_address] "r" (valid_ptr), [val] "f" (val_to_store)
-            : "memory");
+            : "memory", "a0");
     valid_res = float_val;
     float_val = 123.1f;
     __asm__  volatile (
@@ -118,7 +160,7 @@ bool float_store_check()
             "fsw %[val], 0(a0)\n"
             :
             : [in_address] "r" (invalid_ptr), [val] "f" (val_to_store)
-            : "memory");
+            : "memory", "a0");
     invalid_res = float_val;
     return (valid_res == invalid_res);
 }
@@ -291,6 +333,13 @@ int main()
         exit(-8);
     } else {
         std::cout << "Int compressed store check succeeded" << std::endl;
+    }
+
+    if (!atomic_lr_sc_check()) {
+        std::cout << "Failed to perform atomic lr->sc sequence check" << std::endl;
+        exit(-9);
+    } else {
+        std::cout << "Atomic lr->sc sequence check succeeded" << std::endl;
     }
     return 0;
 }
