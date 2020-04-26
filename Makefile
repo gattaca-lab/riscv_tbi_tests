@@ -20,7 +20,7 @@ build/$(ABI_TEST): Makefile $(ABI_TEST).cpp
 	$(RISCV_CXX) -O0 $(ABI_TEST).cpp -o build/$(ABI_TEST)
 
 build/$(TBI_INSN_TEST): Makefile $(TBI_INSN_TEST).cpp
-	$(RISCV_CXX) -O0 test_tbi.cpp -o build/$(TBI_INSN_TEST)
+	$(RISCV_CXX) -O0 $(TBI_INSN_TEST).cpp -o build/$(TBI_INSN_TEST)
 
 all: \
 	build/$(CTRL_TEST) \
