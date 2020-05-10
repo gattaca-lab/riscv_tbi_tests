@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <cstdlib>
 #include <unistd.h>
 #include <string.h>
 #include <signal.h>
@@ -9,6 +10,7 @@
 #include <sys/mman.h>
 #include <ucontext.h>
 #include <iostream>
+#include <cassert>
 #include <thread>
 #include <chrono>
 
@@ -97,6 +99,35 @@ void  the_handler(int signal, siginfo_t * info, void * context) {
   }
 }
 
+#define D_TAGGED_OP_CHECK(opcode, addr) \
+  sys_write("checking <" #opcode "> operation...\n"); \
+    __asm__  volatile (                               \
+        "mv a0, %[in_address]\n"                      \
+        #opcode " a1, 0(a0)\n"                        \
+        :                                             \
+        : [in_address] "r" (addr)                     \
+        : "memory", "a1", "a0")                       \
+
+void test_operation(uint64_t uptr) {
+
+  struct Seed { Seed(unsigned seed) { std::srand(seed); } };
+
+  static Seed TheSeed(1);
+
+  switch(std::rand() % 7) {
+  case 0: D_TAGGED_OP_CHECK(ld, uptr); break;
+  case 1: D_TAGGED_OP_CHECK(lb, uptr); break;
+  case 2: D_TAGGED_OP_CHECK(lbu, uptr); break;
+  case 3: D_TAGGED_OP_CHECK(sd, uptr); break;
+  case 4: D_TAGGED_OP_CHECK(sb, uptr); break;
+  case 5: D_TAGGED_OP_CHECK(sw, uptr); break;
+  case 6: D_TAGGED_OP_CHECK(lw, uptr); break;
+  default:
+    sys_write("should not happend - unexpected type of check requested!\n");
+    exit(-100);
+  }
+}
+
 
 int main (int argc, char* argv[]) {
   // install signal handler
@@ -124,7 +155,8 @@ int main (int argc, char* argv[]) {
     int prev_value = g_var;
     volatile int* ptr = &g_var;
     uint64_t uptr = (uint64_t)ptr;
-    uptr |= 1ull << 63;
+    uint64_t tag = (i % 255u) + 1u;
+    uptr |= tag << 56;
     if (status) {
       ptr = (volatile int*)uptr;
       ++*ptr;
@@ -143,12 +175,8 @@ int main (int argc, char* argv[]) {
     } else {
        adjust_a0 = true;
        expect_fault = true;
-       __asm__  volatile (
-         "mv a0, %[in_address]\n"
-         "ld a1, 0(a0)\n"
-         :
-         : [in_address] "r" (uptr)
-         : "memory", "a1", "a0");
+
+       test_operation(uptr);
 
        if (fault_observed) {
          std::cerr << "fault was observed @" << std::hex << uptr << std::dec <<
@@ -159,7 +187,7 @@ int main (int argc, char* argv[]) {
          exit(-4);
        }
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
   }
   return 0;
 }
